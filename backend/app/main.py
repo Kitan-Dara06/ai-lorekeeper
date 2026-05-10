@@ -11,8 +11,11 @@ from app.routers import auth, files, synthesis
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Create tables on startup (dev convenience — use Alembic in prod)."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    except Exception as e:
+        print(f"WARNING: Could not create tables on startup: {e}")
     yield
     await engine.dispose()
 
@@ -23,13 +26,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow frontend dev server and production
+# CORS — parse from comma-separated env var
+origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",  # Next.js dev
-        "https://lorekeeper.vercel.app",  # Production frontend
-    ],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
