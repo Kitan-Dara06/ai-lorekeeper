@@ -3,13 +3,15 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .venv/
-*.env
+.env
+.env.local
 backend/uploaded_files/*
 
 # Node
 frontend/node_modules/
 frontend/.next/
 frontend/out/
+*.tsbuildinfo
 
 # OS
 .DS_Store
