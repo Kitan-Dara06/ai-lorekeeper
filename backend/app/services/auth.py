@@ -12,7 +12,6 @@ def verify_supabase_token(token: str) -> dict | None:
             token,
             settings.SUPABASE_JWT_SECRET,
             algorithms=["HS256"],
-            audience="authenticated",
         )
         return payload
     except Exception:

@@ -28,7 +28,6 @@ async def exchange_session(
             token,
             settings.SUPABASE_JWT_SECRET,
             algorithms=["HS256"],
-            audience="authenticated",
         )
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid token")
