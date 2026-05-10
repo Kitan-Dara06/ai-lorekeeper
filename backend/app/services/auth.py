@@ -72,7 +72,7 @@ async def verify_supabase_token(token: str) -> dict | None:
                 token,
                 public_key,
                 algorithms=[alg],
-                options={"verify_exp": False},
+                options={"verify_exp": False, "verify_aud": False},
             )
             logger.info(f"Token valid: user={payload.get('sub')} alg={alg}")
             return payload
@@ -92,7 +92,7 @@ async def verify_supabase_token(token: str) -> dict | None:
             token,
             secret,
             algorithms=["HS256"],
-            options={"verify_exp": False},
+            options={"verify_exp": False, "verify_aud": False},
         )
         logger.info(f"HS256 token valid: user={payload.get('sub')}")
         return payload
