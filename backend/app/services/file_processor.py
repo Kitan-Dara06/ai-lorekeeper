@@ -91,11 +91,11 @@ def infer_period_from_filename(
 ) -> tuple[Optional[datetime], Optional[datetime]]:
     """Try to infer a date period from common filename patterns."""
     patterns = [
-        (r"(\d{4})-(\d{2})", lambda m: (datetime(int(m[1]), int(m[2]), 1), None)),
-        (r"(\d{4})_(\d{2})", lambda m: (datetime(int(m[1]), int(m[2]), 1), None)),
+        (r"(\d{4})-(\d{2})", lambda m: (datetime(int(m[0]), int(m[1]), 1), None)),
+        (r"(\d{4})_(\d{2})", lambda m: (datetime(int(m[0]), int(m[1]), 1), None)),
         (
             r"(\d{4})",
-            lambda m: (datetime(int(m[1]), 1, 1), datetime(int(m[1]), 12, 31)),
+            lambda m: (datetime(int(m[0]), 1, 1), datetime(int(m[0]), 12, 31)),
         ),
     ]
     for pattern, factory in patterns:
