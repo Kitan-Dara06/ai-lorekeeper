@@ -1,4 +1,6 @@
 import base64
+import hashlib
+import hmac
 import json
 import logging
 import uuid
@@ -10,105 +12,112 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Cache the JWKS client so we don't fetch on every request
-_jwks_client = None
+
+def _base64url_decode(data: str) -> bytes:
+    """Decode base64url with padding."""
+    rem = len(data) % 4
+    if rem:
+        data += "=" * (4 - rem)
+    return base64.urlsafe_b64decode(data)
 
 
-def _get_jwks_client():
-    """Get or create the JWKS client for verifying Supabase tokens."""
-    global _jwks_client
-    if _jwks_client is None:
-        jwks_url = f"{settings.SUPABASE_URL}/auth/v1/.well-known/jwks.json"
-        _jwks_client = JWKSClient(jwks_url)
-    return _jwks_client
-
-
-class JWKSClient:
-    """Fetches and caches Supabase JWKS for RS256 token verification."""
-
-    def __init__(self, url: str):
-        self.url = url
-        self.keys = None
-
-    async def get_public_key(self, token: str) -> str | None:
-        if not self.keys:
-            try:
-                async with httpx.AsyncClient() as client:
-                    resp = await client.get(self.url)
-                    resp.raise_for_status()
-                    self.keys = resp.json().get("keys", [])
-            except Exception as e:
-                logger.warning(f"Failed to fetch JWKS: {e}")
-                return None
-
-        # Get the key ID from the token header
-        header = self._decode_header(token)
-        if not header:
+def _decode_jwt_parts(token: str) -> tuple[dict, dict, str] | None:
+    """Split JWT into (header, payload, signature_b64)."""
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
             return None
-
-        kid = header.get("kid")
-        for key in self.keys:
-            if key.get("kid") == kid:
-                return jwk.construct(key)
-
-        # Fallback: use first key if no kid match
-        if self.keys:
-            return jwk.construct(self.keys[0])
+        header = json.loads(_base64url_decode(parts[0]))
+        payload = json.loads(_base64url_decode(parts[1]))
+        return header, payload, parts[2]
+    except Exception as e:
+        logger.warning(f"Failed to parse JWT: {e}")
         return None
 
-    @staticmethod
-    def _decode_header(token: str) -> dict | None:
-        try:
-            header_b64 = token.split(".")[0]
-            padding = 4 - len(header_b64) % 4
-            if padding != 4:
-                header_b64 += "=" * padding
-            return json.loads(base64.urlsafe_b64decode(header_b64))
-        except Exception:
-            return None
+
+def _verify_hmac(token: str, secret: str) -> dict | None:
+    """Verify an HS256 JWT using HMAC-SHA256."""
+    parts = _decode_jwt_parts(token)
+    if not parts:
+        return None
+    header, payload, sig_b64 = parts
+
+    # Recreate the signing input
+    message = token.rsplit(".", 1)[0]
+    expected_sig = hmac.new(
+        secret.encode("utf-8"),
+        message.encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+
+    # Decode the provided signature
+    try:
+        actual_sig = _base64url_decode(sig_b64)
+    except Exception:
+        logger.warning("Failed to decode signature")
+        return None
+
+    if not hmac.compare_digest(expected_sig, actual_sig):
+        logger.warning("HMAC signature mismatch")
+        return None
+
+    return payload
 
 
 async def verify_supabase_token(token: str) -> dict | None:
-    """Verify a Supabase JWT and return its payload. Handles both RS256 and HS256."""
-    # Decode header to check algorithm
-    header = JWKSClient._decode_header(token)
-    if header:
-        logger.info(f"JWT alg: {header.get('alg')}, kid: {header.get('kid')}")
+    """Verify a Supabase JWT. Tries HMAC (HS256) first, then JWKS (RS256)."""
+    parts = _decode_jwt_parts(token)
+    if not parts:
+        logger.warning("Malformed JWT")
+        return None
 
-    alg = (header or {}).get("alg", "HS256")
+    header, _payload, _sig = parts
+    alg = header.get("alg", "HS256")
+    logger.info(f"JWT alg: {alg}, kid: {header.get('kid')}")
 
-    try:
-        if alg == "RS256":
-            # RS256 — use JWKS public key
-            public_key = await _get_jwks_client().get_public_key(token)
-            if public_key is None:
-                logger.warning("Could not get public key from JWKS")
-                return None
-            payload = jwt.decode(
-                token,
-                public_key,
-                algorithms=["RS256"],
-                options={"verify_exp": False},
-            )
-        else:
-            # HS256 — use shared secret (or fallback)
-            secret = settings.SUPABASE_JWT_SECRET
-            if not secret:
-                logger.warning("SUPABASE_JWT_SECRET not configured")
-                return None
-            payload = jwt.decode(
-                token,
-                secret,
-                algorithms=["HS256"],
-                options={"verify_exp": False},
-            )
+    if alg == "RS256":
+        # RS256 — fetch public key from JWKS
+        try:
+            jwks_url = f"{settings.SUPABASE_URL}/auth/v1/.well-known/jwks.json"
+            logger.info(f"Fetching JWKS from {jwks_url}")
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(jwks_url)
+                resp.raise_for_status()
+                keys = resp.json().get("keys", [])
 
-        logger.info(f"Token valid for user: {payload.get('sub')}")
+            kid = header.get("kid")
+            key_data = None
+            for k in keys:
+                if k.get("kid") == kid or key_data is None:
+                    key_data = k
+
+            if key_data:
+                public_key = jwk.construct(key_data)
+                payload = jwt.decode(
+                    token,
+                    public_key,
+                    algorithms=["RS256"],
+                    options={"verify_exp": False},
+                )
+                logger.info(f"RS256 token valid for user: {payload.get('sub')}")
+                return payload
+        except Exception as e:
+            logger.warning(f"RS256 verification failed: {e}")
+            return None
+
+    # HS256 — verify HMAC signature manually
+    secret = settings.SUPABASE_JWT_SECRET
+    if not secret:
+        logger.warning("SUPABASE_JWT_SECRET not configured")
+        return None
+
+    payload = _verify_hmac(token, secret)
+    if payload:
+        logger.info(f"HS256 token valid for user: {payload.get('sub')}")
         return payload
 
-    except Exception as e:
-        logger.warning(f"Token verification failed: {e}")
-        return None
+    logger.warning("Token verification failed")
+    return None
 
 
 def get_or_create_user_from_token(db, payload: dict):
