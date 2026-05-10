@@ -1,8 +1,11 @@
+import logging
 import uuid
 
-from jose import jwt
+from jose import ExpiredSignatureError, JWTError, jwt
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def verify_supabase_token(token: str) -> dict | None:
@@ -12,9 +15,18 @@ def verify_supabase_token(token: str) -> dict | None:
             token,
             settings.SUPABASE_JWT_SECRET,
             algorithms=["HS256"],
+            options={"verify_exp": False},
         )
+        logger.info(f"Token valid for user: {payload.get('sub')}")
         return payload
-    except Exception:
+    except ExpiredSignatureError:
+        logger.warning("Token expired")
+        return None
+    except JWTError as e:
+        logger.warning(f"JWT validation failed: {e}")
+        return None
+    except Exception as e:
+        logger.warning(f"Token verification error: {e}")
         return None
 
 

@@ -2,13 +2,12 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer
-from jose import jwt
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
 from app.database import get_db
 from app.models.user import User
 from app.schemas.auth import AuthResponse
+from app.services.auth import get_or_create_user_from_token, verify_supabase_token
 from app.utils.deps import get_current_user
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -19,17 +18,10 @@ async def exchange_session(
     db: AsyncSession = Depends(get_db),
     credentials: HTTPBearer = Depends(HTTPBearer()),
 ):
-    """Exchange a Supabase access token for user info.
-    Frontend sends the Supabase JWT; backend validates it, ensures a local
-    user record exists, and returns the user info."""
+    """Exchange a Supabase access token for user info."""
     token = credentials.credentials
-    try:
-        payload = jwt.decode(
-            token,
-            settings.SUPABASE_JWT_SECRET,
-            algorithms=["HS256"],
-        )
-    except Exception:
+    payload = verify_supabase_token(token)
+    if payload is None:
         raise HTTPException(status_code=401, detail="Invalid token")
 
     user_id = uuid.UUID(payload["sub"])
