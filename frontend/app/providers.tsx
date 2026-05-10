@@ -45,8 +45,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSession(s);
 
     try {
-      const apiBase =
-        process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      const apiBase = (
+        process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      ).replace(/\/+$/, "");
       const res = await fetch(`${apiBase}/api/auth/session`, {
         method: "POST",
         headers: {
