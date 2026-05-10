@@ -27,7 +27,7 @@ async def get_current_user(
     if payload is None:
         raise exc
 
-    user = get_or_create_user_from_token(db, payload)
+    user = await get_or_create_user_from_token(db, payload)
     if user is None:
         raise exc
     return user

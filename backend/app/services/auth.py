@@ -101,7 +101,7 @@ async def verify_supabase_token(token: str) -> dict | None:
         return None
 
 
-def get_or_create_user_from_token(db, payload: dict):
+async def get_or_create_user_from_token(db, payload: dict):
     """Get local user record, creating one if it doesn't exist."""
     user_id = uuid.UUID(payload["sub"])
     email = payload.get("email", "")
@@ -110,12 +110,12 @@ def get_or_create_user_from_token(db, payload: dict):
 
     from app.models.user import User
 
-    result = db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
 
     if not user:
         user = User(id=user_id, email=email)
         db.add(user)
-        db.flush()
+        await db.flush()
 
     return user
