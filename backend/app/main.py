@@ -1,3 +1,4 @@
+import re
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -26,10 +27,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — parse from comma-separated env var
+# CORS — match explicit origins + any *.vercel.app or *.herokuapp.com
 origins = [o.strip() for o in settings.CORS_ORIGINS.split(",") if o.strip()]
+origin_regex = r"https://[a-z0-9-]+\.vercel\.app|https://[a-z0-9-]+\.herokuapp\.com"
 app.add_middleware(
     CORSMiddleware,
+    allow_origin_regex=origin_regex,
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
