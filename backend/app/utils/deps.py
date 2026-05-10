@@ -23,7 +23,7 @@ async def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    payload = verify_supabase_token(token)
+    payload = await verify_supabase_token(token)
     if payload is None:
         raise exc
 

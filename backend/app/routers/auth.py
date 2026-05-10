@@ -20,7 +20,7 @@ async def exchange_session(
 ):
     """Exchange a Supabase access token for user info."""
     token = credentials.credentials
-    payload = verify_supabase_token(token)
+    payload = await verify_supabase_token(token)
     if payload is None:
         raise HTTPException(status_code=401, detail="Invalid token")
 
