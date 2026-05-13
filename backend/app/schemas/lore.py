@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class StoryArc(BaseModel):
@@ -20,8 +20,8 @@ class DefiningMoment(BaseModel):
 
 
 class MindsetShift(BaseModel):
-    from_state: str
-    to_state: str
+    from_state: str = Field(alias="from")
+    to_state: str = Field(alias="to")
     evidence: str
     period: str
 

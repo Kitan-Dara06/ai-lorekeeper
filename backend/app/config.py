@@ -23,17 +23,17 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_JWT_SECRET: str = ""
 
-    # OpenRouter (Gemma 4 inference)
-    OPENROUTER_API_KEY: str = ""
-    OPENROUTER_MODEL: str = "google/gemma-4-31b-it:free"
-    OPENROUTER_API_URL: str = "https://openrouter.ai/api/v1/chat/completions"
+    # Groq / Modal (Gemma 4 inference)
+    INFERENCE_API_KEY: str = ""
+    INFERENCE_MODEL: str = "google/gemma-4-E4B-it"
+    INFERENCE_API_URL: str = "https://ololadeaaliyah--ai-lorekeeper-gemma-serve.modal.run/v1/chat/completions"
 
     # Files
     UPLOAD_DIR: str = "uploaded_files"
     MAX_UPLOAD_SIZE_MB: int = 50
     MAX_TEXT_CHARS_PER_BATCH: int = 100_000
 
-    # CORS — comma-separated list of allowed origins
+    # CORS
     CORS_ORIGINS: str = "http://localhost:3000,https://lorekeeper.vercel.app"
 
     class Config:

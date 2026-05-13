@@ -42,16 +42,16 @@ Requirements:
 6. If the data includes images, describe what the images suggest about the person's life"""
 
 
-# ─── OpenRouter API call ──────────────────────────────────────────────────────
+# ─── Modal API call ──────────────────────────────────────────────────────
 
 
 async def call_gemma_synthesis(batched_text: str) -> Optional[dict]:
-    """Send batched content to Gemma via OpenRouter. Returns parsed JSON or None."""
-    if not settings.OPENROUTER_API_KEY:
+    """Send batched content to Gemma on Modal. Returns parsed JSON or None."""
+    if not settings.INFERENCE_API_URL:
         return _fallback_synthesis(batched_text)
 
     payload = {
-        "model": settings.OPENROUTER_MODEL,
+        "model": settings.INFERENCE_MODEL,
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
             {
@@ -65,15 +65,12 @@ async def call_gemma_synthesis(batched_text: str) -> Optional[dict]:
 
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {settings.OPENROUTER_API_KEY}",
-        "HTTP-Referer": "https://github.com/ai-lorekeeper",
-        "X-Title": "AI Lorekeeper",
     }
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
-                settings.OPENROUTER_API_URL,
+                settings.INFERENCE_API_URL,
                 json=payload,
                 headers=headers,
             )
@@ -91,7 +88,7 @@ async def call_gemma_synthesis(batched_text: str) -> Optional[dict]:
         return _parse_json_response(text_content)
 
     except Exception as e:
-        print(f"OpenRouter API call failed: {e}")
+        print(f"Modal API call failed: {e}")
         return _fallback_synthesis(batched_text)
 
 
