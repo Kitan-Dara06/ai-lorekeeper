@@ -63,7 +63,7 @@ async def upload_file(
         f.write(content)
 
     # Extract text
-    extracted = extract_text(storage_path, file_type)
+    extracted = await extract_text(storage_path, file_type)
 
     # Parse period metadata
     ps = None

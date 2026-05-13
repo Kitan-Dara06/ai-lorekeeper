@@ -1,3 +1,5 @@
+import base64
+import io
 import os
 
 import modal
@@ -14,6 +16,7 @@ image = (
         "accelerate",
         "hf-transfer",
         "fastapi",
+        "pillow",
     )
     .env({"HF_HUB_ENABLE_HF_TRANSFER": "1"})
 )
@@ -28,7 +31,14 @@ class ChatRequest(BaseModel):
     temperature: float = 0.7
 
 
-# ─── Model Class (Keeps the model loaded in VRAM) ─────────────────────────────
+class DescribeImageRequest(BaseModel):
+    image_base64: str
+    prompt: str = (
+        "Describe what you see in this image in detail. Include any text you can read."
+    )
+
+
+# ─── Model Class ──────────────────────────────────────────────────────────────
 
 
 @app.cls(
@@ -41,11 +51,11 @@ class LorekeeperEngine:
     @modal.enter()
     def load_model(self):
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoModelForCausalLM, AutoProcessor
 
         model_id = os.environ.get("GEMMA_MODEL_ID", "google/gemma-4-E4B-it")
         print(f"Loading {model_id}...")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
+        self.processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
         self.model = AutoModelForCausalLM.from_pretrained(
             model_id,
             torch_dtype=torch.bfloat16,
@@ -56,20 +66,58 @@ class LorekeeperEngine:
 
     @modal.method()
     def generate(self, messages, max_tokens, temperature):
-        prompt = self.tokenizer.apply_chat_template(
+        prompt = self.processor.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True
         )
-        inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+        inputs = self.processor(prompt, return_tensors="pt").to(self.model.device)
         outputs = self.model.generate(
             **inputs,
             max_new_tokens=max_tokens,
             temperature=temperature,
             do_sample=True,
         )
-        text = self.tokenizer.decode(
+        text = self.processor.decode(
             outputs[0][inputs.input_ids.shape[1] :], skip_special_tokens=True
         )
         return text
+
+    @modal.method()
+    def describe_image(self, image_base64: str, prompt: str):
+        """Analyze an image and return a text description."""
+        import torch
+        from PIL import Image as PilImage
+
+        # Decode base64 to image
+        image_data = base64.b64decode(image_base64)
+        pil_image = PilImage.open(io.BytesIO(image_data))
+
+        # Use processor for multimodal input
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image"},
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ]
+        prompt_text = self.processor.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True
+        )
+        inputs = self.processor(
+            text=prompt_text, images=pil_image, return_tensors="pt"
+        ).to(self.model.device)
+
+        outputs = self.model.generate(
+            **inputs,
+            max_new_tokens=512,
+            temperature=0.3,
+            do_sample=True,
+        )
+        text = self.processor.decode(
+            outputs[0][inputs.input_ids.shape[1] :], skip_special_tokens=True
+        )
+        return text.strip()
 
 
 # ─── API Routes ───────────────────────────────────────────────────────────────
@@ -86,6 +134,13 @@ def serve():
             request.messages, request.max_tokens, request.temperature
         )
         return {"choices": [{"message": {"content": text, "role": "assistant"}}]}
+
+    @web_app.post("/v1/describe-image")
+    async def describe_image(request: DescribeImageRequest):
+        description = await engine.describe_image.remote.aio(
+            request.image_base64, request.prompt
+        )
+        return {"description": description}
 
     @web_app.get("/v1/models")
     async def list_models():

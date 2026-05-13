@@ -1,25 +1,62 @@
+import base64
 import csv
-import io
 import json
 import os
 import re
-import uuid
 from datetime import datetime
 from typing import Optional
 
+import httpx
 from PIL import Image
 
 from app.config import settings
 
+MODAL_DESCRIBE_URL = (
+    "https://ololadeaaliyah--ai-lorekeeper-gemma-serve.modal.run/v1/describe-image"
+)
+
+
+async def describe_image_via_gemma(file_path: str) -> Optional[str]:
+    """Send image to Gemma 4 on Modal for a detailed description."""
+    try:
+        with open(file_path, "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode()
+
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(
+                MODAL_DESCRIBE_URL,
+                json={
+                    "image_base64": img_b64,
+                    "prompt": "Describe this image in detail. Read any visible text. What story does this image tell about this person's life?",
+                },
+            )
+            if response.status_code == 200:
+                desc = response.json().get("description", "")
+                if desc:
+                    return f"[Image description from AI: {desc}]"
+        return _extract_image_metadata(file_path)
+    except Exception:
+        return _extract_image_metadata(file_path)
+
+
+def _extract_image_metadata(file_path: str) -> str:
+    try:
+        img = Image.open(file_path)
+        info = {
+            "format": img.format,
+            "size": f"{img.width}x{img.height}",
+            "mode": img.mode,
+        }
+        return f"[Image: {json.dumps(info)}]"
+    except Exception:
+        return f"[Image file: {os.path.basename(file_path)}]"
+
 
 def extract_text_from_pdf(file_path: str) -> str:
-    """Extract text from a PDF using PyMuPDF."""
     import fitz
 
     doc = fitz.open(file_path)
-    text_parts = []
-    for page in doc:
-        text_parts.append(page.get_text())
+    text_parts = [page.get_text() for page in doc]
     doc.close()
     return "\n".join(text_parts)
 
@@ -30,66 +67,44 @@ def extract_text_from_txt(file_path: str) -> str:
 
 
 def extract_text_from_md(file_path: str) -> str:
-    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-        return f.read()
+    return extract_text_from_txt(file_path)
 
 
 def extract_text_from_json(file_path: str) -> str:
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
-        data = json.load(f)
-    return json.dumps(data, indent=2)
+        return json.dumps(json.load(f), indent=2)
 
 
 def extract_text_from_csv(file_path: str) -> str:
     with open(file_path, "r", encoding="utf-8", errors="replace") as f:
         reader = csv.reader(f)
-        rows = [", ".join(row) for row in reader]
-    return "\n".join(rows)
+        return "\n".join([", ".join(row) for row in reader])
 
 
-def extract_text_from_image(file_path: str) -> Optional[str]:
-    """Extract metadata and description from image. Actual OCR not performed in MVP."""
-    try:
-        img = Image.open(file_path)
-        info = {
-            "format": img.format,
-            "size": f"{img.width}x{img.height}",
-            "mode": img.mode,
-        }
-        exif_data = img._getexif() if hasattr(img, "_getexif") else None
-        if exif_data:
-            info["exif"] = str(exif_data)
-        return f"[Image: {json.dumps(info)}]"
-    except Exception:
-        return f"[Image file: {os.path.basename(file_path)}]"
+async def extract_text(file_path: str, file_type: str) -> Optional[str]:
+    """Extract text from a file. Images use Gemma 4 vision; others use direct parsing."""
+    if file_type.lower() in ("jpg", "jpeg", "png", "webp"):
+        return await describe_image_via_gemma(file_path)
 
-
-def extract_text(file_path: str, file_type: str) -> Optional[str]:
-    """Extract text content from a file based on its type."""
     extractors = {
         "pdf": extract_text_from_pdf,
         "txt": extract_text_from_txt,
         "md": extract_text_from_md,
         "json": extract_text_from_json,
         "csv": extract_text_from_csv,
-        "jpg": extract_text_from_image,
-        "jpeg": extract_text_from_image,
-        "png": extract_text_from_image,
-        "webp": extract_text_from_image,
     }
     extractor = extractors.get(file_type.lower())
     if extractor:
         try:
             return extractor(file_path)
         except Exception as e:
-            return f"[Error extracting text: {str(e)}]"
+            return f"[Error: {str(e)}]"
     return None
 
 
 def infer_period_from_filename(
     filename: str,
 ) -> tuple[Optional[datetime], Optional[datetime]]:
-    """Try to infer a date period from common filename patterns."""
     patterns = [
         (r"(\d{4})-(\d{2})", lambda m: (datetime(int(m[0]), int(m[1]), 1), None)),
         (r"(\d{4})_(\d{2})", lambda m: (datetime(int(m[0]), int(m[1]), 1), None)),
@@ -106,8 +121,7 @@ def infer_period_from_filename(
 
 
 def get_file_type(filename: str) -> str:
-    ext = os.path.splitext(filename)[1].lower().lstrip(".")
-    return ext if ext else "unknown"
+    return os.path.splitext(filename)[1].lower().lstrip(".") or "unknown"
 
 
 ALLOWED_TYPES = {"txt", "pdf", "md", "json", "csv", "jpg", "jpeg", "png", "webp"}
