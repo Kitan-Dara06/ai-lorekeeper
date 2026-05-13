@@ -36,8 +36,7 @@ async def trigger_synthesis(
     user_id: uuid.UUID,
     file_ids: Optional[list[str]] = None,
 ) -> SynthesisRun:
-    """Create a synthesis run and execute it inline (sync for MVP)."""
-    # Resolve file IDs
+    """Create a synthesis run, start background processing, return immediately."""
     if file_ids:
         ids = [uuid.UUID(fid) for fid in file_ids]
     else:
@@ -46,7 +45,6 @@ async def trigger_synthesis(
         )
         ids = [row[0] for row in result.fetchall()]
 
-    # Create the run
     run = SynthesisRun(
         user_id=user_id,
         file_ids=ids,
@@ -54,65 +52,80 @@ async def trigger_synthesis(
     )
     db.add(run)
     await db.flush()
+    await db.commit()
 
-    try:
-        # Collect and batch content chronologically
-        batched = await _collect_and_batch_content(db, user_id, ids)
+    # Fire-and-forget: start synthesis in background
+    import asyncio
 
-        # Call Gemma 4
-        raw_output = await call_gemma_synthesis(batched)
+    asyncio.create_task(_run_synthesis_background(run.id, user_id, ids))
 
-        if raw_output is None:
-            raise ValueError("Gemma 4 returned no output")
-
-        # Validate with Pydantic
-        validated = GemmaLoreOutput(**raw_output)
-
-        # Store the lore output
-        lore = LoreOutput(
-            run_id=run.id,
-            user_id=user_id,
-            the_sentence=validated.the_sentence,
-            narrative=validated.narrative,
-            story_arcs=_serialize_lore_field(
-                [a.model_dump() for a in validated.story_arcs]
-            ),
-            recurring_people=_serialize_lore_field(
-                [p.model_dump() for p in validated.recurring_people]
-            ),
-            defining_moments=_serialize_lore_field(
-                [m.model_dump() for m in validated.defining_moments]
-            ),
-            mindset_shifts=_serialize_lore_field(
-                [s.model_dump() for s in validated.mindset_shifts]
-            ),
-            core_themes=_serialize_lore_field(validated.core_themes),
-            identity_contradictions=_serialize_lore_field(
-                [c.model_dump() for c in validated.identity_contradictions]
-            ),
-        )
-        db.add(lore)
-        run.status = "completed"
-
-    except Exception as e:
-        run.status = "failed"
-        # Store error info
-        error_lore = LoreOutput(
-            run_id=run.id,
-            user_id=user_id,
-            the_sentence="Synthesis failed on this run.",
-            narrative=f"An error occurred during synthesis: {str(e)}",
-            story_arcs="[]",
-            recurring_people="[]",
-            defining_moments="[]",
-            mindset_shifts="[]",
-            core_themes="[]",
-            identity_contradictions="[]",
-        )
-        db.add(error_lore)
-
-    await db.flush()
     return run
+
+
+async def _run_synthesis_background(
+    run_id: uuid.UUID,
+    user_id: uuid.UUID,
+    file_ids: list[uuid.UUID],
+):
+    """Run synthesis in the background (separate session to avoid conflicts)."""
+    from app.database import async_session_factory
+
+    async with async_session_factory() as db:
+        try:
+            run = await db.get(SynthesisRun, run_id)
+            if not run:
+                return
+
+            batched = await _collect_and_batch_content(db, user_id, file_ids)
+            raw_output = await call_gemma_synthesis(batched)
+
+            if raw_output is None:
+                raise ValueError("Gemma returned no output")
+
+            validated = GemmaLoreOutput(**raw_output)
+
+            lore = LoreOutput(
+                run_id=run.id,
+                user_id=user_id,
+                the_sentence=validated.the_sentence,
+                narrative=validated.narrative,
+                story_arcs=_serialize_lore_field(
+                    [a.model_dump() for a in validated.story_arcs]
+                ),
+                recurring_people=_serialize_lore_field(
+                    [p.model_dump() for p in validated.recurring_people]
+                ),
+                defining_moments=_serialize_lore_field(
+                    [m.model_dump() for m in validated.defining_moments]
+                ),
+                mindset_shifts=_serialize_lore_field(
+                    [s.model_dump() for s in validated.mindset_shifts]
+                ),
+                core_themes=_serialize_lore_field(validated.core_themes),
+                identity_contradictions=_serialize_lore_field(
+                    [c.model_dump() for c in validated.identity_contradictions]
+                ),
+            )
+            db.add(lore)
+            run.status = "completed"
+
+        except Exception as e:
+            run.status = "failed"
+            lore = LoreOutput(
+                run_id=run_id,
+                user_id=user_id,
+                the_sentence="Synthesis failed on this run.",
+                narrative=f"An error occurred: {str(e)}",
+                story_arcs="[]",
+                recurring_people="[]",
+                defining_moments="[]",
+                mindset_shifts="[]",
+                core_themes="[]",
+                identity_contradictions="[]",
+            )
+            db.add(lore)
+
+        await db.commit()
 
 
 async def _collect_and_batch_content(
