@@ -90,20 +90,23 @@ async def _run_synthesis_background(
                 the_sentence=validated.the_sentence,
                 narrative=validated.narrative,
                 story_arcs=_serialize_lore_field(
-                    [a.model_dump() for a in validated.story_arcs]
+                    [a.model_dump(by_alias=True) for a in validated.story_arcs]
                 ),
                 recurring_people=_serialize_lore_field(
-                    [p.model_dump() for p in validated.recurring_people]
+                    [p.model_dump(by_alias=True) for p in validated.recurring_people]
                 ),
                 defining_moments=_serialize_lore_field(
-                    [m.model_dump() for m in validated.defining_moments]
+                    [m.model_dump(by_alias=True) for m in validated.defining_moments]
                 ),
                 mindset_shifts=_serialize_lore_field(
-                    [s.model_dump() for s in validated.mindset_shifts]
+                    [s.model_dump(by_alias=True) for s in validated.mindset_shifts]
                 ),
                 core_themes=_serialize_lore_field(validated.core_themes),
                 identity_contradictions=_serialize_lore_field(
-                    [c.model_dump() for c in validated.identity_contradictions]
+                    [
+                        c.model_dump(by_alias=True)
+                        for c in validated.identity_contradictions
+                    ]
                 ),
             )
             db.add(lore)
