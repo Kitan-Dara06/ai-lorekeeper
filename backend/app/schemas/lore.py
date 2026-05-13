@@ -20,8 +20,8 @@ class DefiningMoment(BaseModel):
 
 
 class MindsetShift(BaseModel):
-    from_state: str = Field(alias="from")
-    to_state: str = Field(alias="to")
+    from_state: str
+    to_state: str
     evidence: str
     period: str
 

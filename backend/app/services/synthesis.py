@@ -103,10 +103,7 @@ async def _run_synthesis_background(
                 ),
                 core_themes=_serialize_lore_field(validated.core_themes),
                 identity_contradictions=_serialize_lore_field(
-                    [
-                        c.model_dump(by_alias=True)
-                        for c in validated.identity_contradictions
-                    ]
+                    [c.model_dump() for c in validated.identity_contradictions]
                 ),
             )
             db.add(lore)

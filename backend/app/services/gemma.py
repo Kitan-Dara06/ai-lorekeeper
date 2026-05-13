@@ -25,7 +25,7 @@ Output ONLY valid JSON — no preamble, no explanation, no markdown formatting. 
     {"moment": "specific event or entry", "significance": "why it matters"}
   ],
   "mindset_shifts": [
-    {"from": "previous state", "to": "new state", "evidence": "what shows this shift", "period": "when it occurred"}
+    {"from_state": "previous state", "to_state": "new state", "evidence": "what shows this shift", "period": "when it occurred"}
   ],
   "core_themes": ["theme1", "theme2"],
   "identity_contradictions": [
@@ -163,8 +163,8 @@ def _fallback_synthesis(batched_text: str) -> dict:
         ],
         "mindset_shifts": [
             {
-                "from": "Unorganized memory",
-                "to": "Structured reflection",
+                "from_state": "Unorganized memory",
+                "to_state": "Structured reflection",
                 "evidence": "Moving from scattered files to synthesized narrative.",
                 "period": "Ongoing",
             }
