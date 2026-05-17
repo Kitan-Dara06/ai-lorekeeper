@@ -1,4 +1,5 @@
 import json
+import logging
 import uuid
 from datetime import datetime
 from typing import Optional
@@ -12,6 +13,8 @@ from app.models.synthesis import SynthesisRun
 from app.models.vault_file import VaultFile
 from app.schemas.lore import GemmaLoreOutput
 from app.services.gemma import call_gemma_synthesis
+
+logger = logging.getLogger(__name__)
 
 
 def _serialize_lore_field(data) -> str:
@@ -45,6 +48,7 @@ async def trigger_synthesis(
         )
         ids = [row[0] for row in result.fetchall()]
 
+    logger.info(f"Synthesis triggered for user {user_id}, {len(ids)} files")
     run = SynthesisRun(
         user_id=user_id,
         file_ids=ids,
@@ -54,7 +58,7 @@ async def trigger_synthesis(
     await db.flush()
     await db.commit()
 
-    # Fire-and-forget: start synthesis in background
+    logger.info(f"Run {run.id} created, starting background synthesis")
     import asyncio
 
     asyncio.create_task(_run_synthesis_background(run.id, user_id, ids))
@@ -106,11 +110,13 @@ async def _run_synthesis_background(
                     [c.model_dump() for c in validated.identity_contradictions]
                 ),
             )
+            logger.info(f"Run {run.id}: synthesis completed successfully")
             db.add(lore)
             run.status = "completed"
 
         except Exception as e:
             run.status = "failed"
+            logger.error(f"Run {run_id}: synthesis failed: {e}")
             lore = LoreOutput(
                 run_id=run_id,
                 user_id=user_id,

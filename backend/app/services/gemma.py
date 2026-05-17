@@ -1,10 +1,13 @@
 import json
+import logging
 import re
 from typing import Optional
 
 import httpx
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 # ─── System prompt ────────────────────────────────────────────────────────────
 
@@ -49,8 +52,12 @@ SYSTEM_PROMPT = """You are a personal memory synthesis engine. You analyze a per
 async def call_gemma_synthesis(batched_text: str) -> Optional[dict]:
     """Send batched content to Gemma 4 via Google AI API. Returns parsed JSON or None."""
     if not settings.GEMINI_API_KEY:
+        logger.warning("No GEMINI_API_KEY configured — using fallback synthesis")
         return _fallback_synthesis(batched_text)
 
+    logger.info(
+        f"Sending {len(batched_text)} chars to {settings.GEMINI_MODEL} via Google AI API"
+    )
     url = f"{settings.GEMINI_API_URL}/{settings.GEMINI_MODEL}:generateContent?key={settings.GEMINI_API_KEY}"
 
     payload = {
@@ -85,12 +92,14 @@ async def call_gemma_synthesis(batched_text: str) -> Optional[dict]:
         )
 
         if not text_content:
+            logger.warning("Gemma 4 returned empty response")
             return None
 
+        logger.info("Gemma 4 response received, parsing JSON...")
         return _parse_json_response(text_content)
 
     except Exception as e:
-        print(f"Google AI API call failed: {e}")
+        logger.error(f"Google AI API call failed: {e}")
         return _fallback_synthesis(batched_text)
 
 
@@ -126,6 +135,7 @@ def _parse_json_response(text: str) -> Optional[dict]:
 
 def _fallback_synthesis(batched_text: str) -> dict:
     """Parse the actual uploaded data and extract real information from it."""
+    logger.info("Generating fallback synthesis from parsed data")
 
     # Extract capitalized words, filtering out metadata labels
     words = re.findall(r"[A-Z][a-z]+", batched_text)
