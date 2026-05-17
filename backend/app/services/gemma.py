@@ -8,18 +8,9 @@ from app.config import settings
 
 # ─── System prompt ────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a personal memory synthesis engine. You analyze a person's actual uploaded data — journal entries, chat logs, photos — and produce a structured narrative based SOLELY on what the data says.
+SYSTEM_PROMPT = """You are a personal memory synthesis engine. You analyze a person's actual uploaded data.
 
-## CRITICAL RULES — YOU MUST FOLLOW THESE:
-
-1. **Only mention what is actually in the data.** If the data doesn't mention a city, don't invent one. If the data doesn't mention a person's name, don't invent one.
-2. **Quote specific evidence.** Every claim in the narrative must trace back to a real line in the data. Use phrases like "On [date] you wrote..." or "In a chat with [name] you said..."
-3. **Use real names, dates, and places** that appear in the uploaded files. If the user's journal says "Portland," mention Portland. If they mention "Sarah" three times, Sarah is a recurring person.
-4. **The sentence must be derived from the data** — a synthesis of an actual pattern you observed, not a generic aphorism.
-5. **Identity contradictions must cite conflicting lines** from different entries. Quote both sides.
-6. **Mindset shifts must reference specific time periods** that exist in the data (e.g., "Between January and July 2024").
-
-Output ONLY valid JSON — no preamble, no explanation. The JSON must conform to this exact schema:
+## CRITICAL: You MUST return ONLY valid JSON. No explanations, no markdown, no code fences.
 
 {
   "the_sentence": "one concluding line, max 30 words, based on an actual pattern in the data",
@@ -40,7 +31,16 @@ Output ONLY valid JSON — no preamble, no explanation. The JSON must conform to
   "identity_contradictions": [
     {"observation": "the contradiction visible in the data", "evidence": "quote contradictory entries specifically", "interpretation": "what this tension suggests"}
   ]
-}"""
+}
+
+## RULES:
+1. Only mention what is actually in the data. No inventing names, places, or events.
+2. Quote specific evidence. Use phrases like "On [date] you wrote..." or "In a chat with [name] you said..."
+3. Use real names, dates, and places that appear.
+4. Identity contradictions must cite conflicting entries. Quote both sides.
+5. Mindset shifts must reference specific time periods that exist in the data.
+
+## REMEMBER: Return ONLY the JSON object. No other text."""
 
 
 # ─── Google AI API call ──────────────────────────────────────────────────

@@ -11,29 +11,56 @@ from PIL import Image
 
 from app.config import settings
 
-MODAL_DESCRIBE_URL = (
-    "https://ololadeaaliyah--ai-lorekeeper-gemma-serve.modal.run/v1/describe-image"
-)
-
 
 async def describe_image_via_gemma(file_path: str) -> Optional[str]:
-    """Send image to Gemma 4 on Modal for a detailed description."""
+    """Send image to Gemma 4 via Google AI API for description."""
+    if not settings.GEMINI_API_KEY:
+        return _extract_image_metadata(file_path)
+
     try:
         with open(file_path, "rb") as f:
-            img_b64 = base64.b64encode(f.read()).decode()
+            img_bytes = f.read()
+        img_b64 = base64.b64encode(img_bytes).decode()
 
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        mime = "image/jpeg"
+        if file_path.lower().endswith(".png"):
+            mime = "image/png"
+        elif file_path.lower().endswith(".webp"):
+            mime = "image/webp"
+
+        url = f"{settings.GEMINI_API_URL}/{settings.GEMINI_MODEL}:generateContent?key={settings.GEMINI_API_KEY}"
+
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"inline_data": {"mime_type": mime, "data": img_b64}},
+                        {
+                            "text": "Describe this image in detail. Read any visible text, names, numbers, or dates. What story does this tell about this person's life?"
+                        },
+                    ]
+                }
+            ],
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 512},
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
-                MODAL_DESCRIBE_URL,
-                json={
-                    "image_base64": img_b64,
-                    "prompt": "Describe this image in detail. Read any visible text. What story does this image tell about this person's life?",
-                },
+                url,
+                json=payload,
+                headers={"Content-Type": "application/json"},
             )
             if response.status_code == 200:
-                desc = response.json().get("description", "")
-                if desc:
-                    return f"[Image description from AI: {desc}]"
+                data = response.json()
+                text = (
+                    data.get("candidates", [{}])[0]
+                    .get("content", {})
+                    .get("parts", [{}])[0]
+                    .get("text", "")
+                )
+                if text:
+                    return f"[Image description from AI: {text.strip()}]"
+
         return _extract_image_metadata(file_path)
     except Exception:
         return _extract_image_metadata(file_path)
@@ -85,7 +112,6 @@ async def extract_text(file_path: str, file_type: str) -> Optional[str]:
     """Extract text from a file. Images use Gemma 4 vision; others use direct parsing."""
     if file_type.lower() in ("jpg", "jpeg", "png", "webp"):
         return await describe_image_via_gemma(file_path)
-
     extractors = {
         "pdf": extract_text_from_pdf,
         "txt": extract_text_from_txt,
