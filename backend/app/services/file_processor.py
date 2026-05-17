@@ -52,12 +52,13 @@ async def describe_image_via_gemma(file_path: str) -> Optional[str]:
             )
             if response.status_code == 200:
                 data = response.json()
-                text = (
-                    data.get("candidates", [{}])[0]
-                    .get("content", {})
-                    .get("parts", [{}])[0]
-                    .get("text", "")
-                )
+                text = ""
+                for part in (
+                    data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                ):
+                    if part.get("text", "").strip():
+                        text = part["text"]
+                        break
                 if text:
                     return f"[Image description from AI: {text.strip()}]"
 
