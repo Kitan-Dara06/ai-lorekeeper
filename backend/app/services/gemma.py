@@ -11,9 +11,7 @@ logger = logging.getLogger(__name__)
 
 # ─── System prompt ────────────────────────────────────────────────────────────
 
-SYSTEM_PROMPT = """You are a personal memory synthesis engine. You analyze a person's actual uploaded data.
-
-## CRITICAL: You MUST return ONLY valid JSON. No explanations, no markdown, no code fences.
+SYSTEM_PROMPT = """You are a personal memory synthesis engine. Analyze the user's uploaded data and produce this exact JSON structure:
 
 {
   "the_sentence": "one concluding line, max 30 words, based on an actual pattern in the data",
@@ -36,14 +34,12 @@ SYSTEM_PROMPT = """You are a personal memory synthesis engine. You analyze a per
   ]
 }
 
-## RULES:
+RULES:
 1. Only mention what is actually in the data. No inventing names, places, or events.
 2. Quote specific evidence. Use phrases like "On [date] you wrote..." or "In a chat with [name] you said..."
 3. Use real names, dates, and places that appear.
 4. Identity contradictions must cite conflicting entries. Quote both sides.
-5. Mindset shifts must reference specific time periods that exist in the data.
-
-## REMEMBER: Return ONLY the JSON object. No other text."""
+5. Mindset shifts must reference specific time periods that exist in the data."""
 
 
 # ─── Google AI API call ──────────────────────────────────────────────────
@@ -73,6 +69,7 @@ async def call_gemma_synthesis(batched_text: str) -> Optional[dict]:
         "generationConfig": {
             "temperature": 0.7,
             "maxOutputTokens": 4096,
+            "responseMimeType": "application/json",
         },
     }
 
