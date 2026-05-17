@@ -9,37 +9,21 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# ─── System prompt ────────────────────────────────────────────────────────────
+# ─── No-yapping system prompt with one-shot example ──────────────────────────
 
-SYSTEM_PROMPT = """You are a personal memory synthesis engine. Analyze the user's uploaded data and produce this exact JSON structure:
+SYSTEM_PROMPT = """CRITICAL: Do not explain your thought process. Do not describe these instructions. Do not use conversational filler. Return ONLY the requested JSON output and absolutely nothing else.
 
-{
-  "the_sentence": "one concluding line, max 30 words, based on an actual pattern in the data",
-  "narrative": "prose essay 300-500 words in second person, referencing specific entries, dates, and people from the data",
-  "story_arcs": [
-    {"title": "short title", "description": "brief description, referencing actual events"}
-  ],
-  "recurring_people": [
-    {"identifier": "real name from data", "context": "how they specifically appear"}
-  ],
-  "defining_moments": [
-    {"moment": "specific event from the data", "significance": "why it matters based on surrounding entries"}
-  ],
-  "mindset_shifts": [
-    {"from_state": "previous state visible in early entries", "to_state": "new state visible in later entries", "evidence": "quote or reference specific entries", "period": "actual date range from the data"}
-  ],
-  "core_themes": ["theme that clearly emerges from the data"],
-  "identity_contradictions": [
-    {"observation": "the contradiction visible in the data", "evidence": "quote contradictory entries specifically", "interpretation": "what this tension suggests"}
-  ]
-}
+Extract a personal narrative synthesis from the user's data. Follow the exact format below.
 
-RULES:
-1. Only mention what is actually in the data. No inventing names, places, or events.
-2. Quote specific evidence. Use phrases like "On [date] you wrote..." or "In a chat with [name] you said..."
-3. Use real names, dates, and places that appear.
-4. Identity contradictions must cite conflicting entries. Quote both sides.
-5. Mindset shifts must reference specific time periods that exist in the data."""
+Example:
+Input: Started a new job in March. Felt anxious. By June, made friends at work. Felt happy.
+Output: {"the_sentence": "From anxiety to belonging in three months.", "narrative": "You started a new job in March feeling anxious. By June you had made friends and felt happy.", "story_arcs": [{"title": "Workplace Integration", "description": "From nervous newcomer to social team member over three months."}], "recurring_people": [], "defining_moments": [{"moment": "First day at new job in March", "significance": "Marked the beginning of a major life transition."}], "mindset_shifts": [{"from_state": "Anxious about new environment", "to_state": "Comfortable and happy at work", "evidence": "March entry expressed anxiety; June entry expressed happiness.", "period": "March to June"}], "core_themes": ["growth", "adaptation"], "identity_contradictions": []}
+
+Now produce the same format for the data below. Rules:
+1. Only use actual data. No invented names, places, or events.
+2. Quote specific evidence. Use actual dates and names from the data.
+3. Identity contradictions must cite conflicting entries.
+4. Mindset shifts must reference real time periods from the data."""
 
 
 # ─── Google AI API call ──────────────────────────────────────────────────
@@ -54,24 +38,16 @@ async def call_gemma_synthesis(batched_text: str) -> Optional[dict]:
     logger.info(
         f"Sending {len(batched_text)} chars to {settings.GEMINI_MODEL} via Google AI API"
     )
-    url = f"{settings.GEMINI_API_URL}/{settings.GEMINI_MODEL}:generateContent?key={settings.GEMINI_API_KEY}"
+    model = settings.GEMINI_MODEL
+    url = f"{settings.GEMINI_API_URL}/{model}:generateContent?key={settings.GEMINI_API_KEY}"
+
+    user_msg = (
+        f"{SYSTEM_PROMPT}\n\nUser data:\n{batched_text}\n\nReturn ONLY valid JSON."
+    )
 
     payload = {
-        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-        "contents": [
-            {
-                "parts": [
-                    {
-                        "text": f"Here is the chronological data to analyze:\n\n{batched_text}"
-                    }
-                ]
-            }
-        ],
-        "generationConfig": {
-            "temperature": 0.7,
-            "maxOutputTokens": 4096,
-            "responseMimeType": "application/json",
-        },
+        "contents": [{"parts": [{"text": user_msg}]}],
+        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 4096},
     }
 
     headers = {"Content-Type": "application/json"}
@@ -81,13 +57,16 @@ async def call_gemma_synthesis(batched_text: str) -> Optional[dict]:
             response = await client.post(url, json=payload, headers=headers)
             response.raise_for_status()
             data = response.json()
+            logger.info(f"Full API response: {str(data)[:300]}")
+            if not data.get("candidates"):
+                logger.warning(f"No candidates in response")
+                return None
 
-        text_content = (
-            data.get("candidates", [{}])[0]
-            .get("content", {})
-            .get("parts", [{}])[0]
-            .get("text", "")
-        )
+        text_content = ""
+        for part in data.get("candidates", [{}])[0].get("content", {}).get("parts", []):
+            if part.get("text", "").strip():
+                text_content = part["text"]
+                break
 
         if not text_content:
             logger.warning("Gemma 4 returned empty response")
@@ -114,37 +93,30 @@ async def call_gemma_synthesis(batched_text: str) -> Optional[dict]:
 
 
 def _parse_json_response(text: str) -> Optional[dict]:
-    """Extract and parse JSON from the model's text response."""
     try:
         return json.loads(text)
     except json.JSONDecodeError:
         pass
-
     match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
     if match:
         try:
             return json.loads(match.group(1))
         except json.JSONDecodeError:
             pass
-
     match = re.search(r"\{.*\}", text, re.DOTALL)
     if match:
         try:
             return json.loads(match.group(0))
         except json.JSONDecodeError:
             pass
-
     return None
 
 
-# ─── Fallback that actually parses the data ──────────────────────────────────
+# ─── Fallback ─────────────────────────────────────────────────────────────────
 
 
 def _fallback_synthesis(batched_text: str) -> dict:
-    """Parse the actual uploaded data and extract real information from it."""
     logger.info("Generating fallback synthesis from parsed data")
-
-    # Extract capitalized words, filtering out metadata labels
     words = re.findall(r"[A-Z][a-z]+", batched_text)
     skip_words = {
         "The",
@@ -202,33 +174,27 @@ def _fallback_synthesis(batched_text: str) -> dict:
         "Between",
         "Entry",
     }
-
     word_counts = {}
     for w in words:
         if len(w) > 2 and w not in skip_words:
             word_counts[w] = word_counts.get(w, 0) + 1
-
-    # People: names appearing 2+ times
     people = sorted(
         [w for w, c in word_counts.items() if c >= 2], key=lambda w: -word_counts[w]
     )[:3]
-
-    # Find dates — support multiple formats
     dates = re.findall(
         r"(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},?\s+\d{4}",
         batched_text,
     )
-    # Also find YYYY-MM-DD or YYYY/MM/DD
-    dates += re.findall(r"\b(202\d)[-/](\d{2})[-/]\d{2}\b", batched_text)
-    # Find year mentions
-    years_found = re.findall(r"\b(202\d)\b", batched_text)
-    years_found = sorted(set(years_found))
-
-    # Find filenames from the batch header format
-    filenames = re.findall(r"FILE:\s*([^\]]+)", batched_text)
-    filenames = [f.strip() for f in filenames if f.strip()]
-
-    # Extract key topics from actual content lines
+    years_found = sorted(set(re.findall(r"\b(202\d)\b", batched_text)))
+    filenames = [
+        f.strip() for f in re.findall(r"FILE:\s*([^\]]+)", batched_text) if f.strip()
+    ]
+    year_range = (
+        f"{min(years_found)} to {max(years_found)}"
+        if years_found
+        else "the documented period"
+    )
+    people_str = ", ".join(people[:3]) if people else ""
     lines = batched_text.split("\n")
     content_lines = [
         l.strip()
@@ -262,15 +228,6 @@ def _fallback_synthesis(batched_text: str) -> dict:
         for kw in keywords:
             if kw in lower:
                 topic_map[kw] = topic_map.get(kw, []) + [line[:80]]
-
-    year_range = (
-        f"{min(years_found)} to {max(years_found)}"
-        if years_found
-        else "the documented period"
-    )
-    people_str = ", ".join(people[:3]) if people else ""
-
-    # Build narrative from actual data
     narrative_parts = []
     if filenames:
         narrative_parts.append(
@@ -282,72 +239,60 @@ def _fallback_synthesis(batched_text: str) -> dict:
         )
     if people:
         narrative_parts.append(f"Key people in your story: {people_str}.")
-    if "moved" in topic_map:
-        narrative_parts.append(
-            "A move marks a clear before/after point in your timeline."
-        )
-    if "job" in topic_map or "career" in topic_map:
-        narrative_parts.append(
-            "Career changes and professional growth are recurring themes."
-        )
-    if "friend" in topic_map:
-        narrative_parts.append(
-            "Friendships \u2014 old and new \u2014 play a central role."
-        )
-    if "scared" in topic_map or "afraid" in topic_map:
-        narrative_parts.append(
-            "Early entries show fear and uncertainty, shifting later."
-        )
-    if "alone" in topic_map:
-        narrative_parts.append("The language around being alone shifts over time.")
-    if "promotion" in topic_map:
-        narrative_parts.append("A promotion marks professional validation.")
+    for cond, msg in [
+        ("moved", "A move marks a clear before/after point in your timeline."),
+        (
+            ("job", "career"),
+            "Career changes and professional growth are recurring themes.",
+        ),
+        ("friend", "Friendships play a central role."),
+        (
+            ("scared", "afraid"),
+            "Early entries show fear and uncertainty, shifting later.",
+        ),
+        ("alone", "The language around being alone shifts over time."),
+        ("promotion", "A promotion marks professional validation."),
+    ]:
+        if isinstance(cond, tuple):
+            if any(k in topic_map for k in cond):
+                narrative_parts.append(msg)
+        elif cond in topic_map:
+            narrative_parts.append(msg)
 
-    fallback_narrative = (
-        " ".join(narrative_parts)
-        if narrative_parts
-        else f"Your {len(filenames)} uploaded files span {year_range}."
-    )
-
-    # Story arcs from actual topics
     arcs = []
-    if "moved" in topic_map or "city" in topic_map:
-        arcs.append(
-            {
-                "title": "Relocation & Reinvention",
-                "description": f"A move documented in your files, showing adaptation to a new environment across {year_range}.",
-            }
-        )
-    if "job" in topic_map or "career" in topic_map:
-        arcs.append(
-            {
-                "title": "Career Evolution",
-                "description": f"Professional changes appear in your entries, documenting growth and uncertainty.",
-            }
-        )
-    if "friend" in topic_map:
-        arcs.append(
-            {
-                "title": "Social Landscape",
-                "description": f"Relationships with {people_str if people else 'others'} evolve across your timeline.",
-            }
-        )
-    if "alone" in topic_map:
-        arcs.append(
-            {
-                "title": "Solitude & Self-Discovery",
-                "description": f"An arc from loneliness to chosen solitude, visible across your entries.",
-            }
-        )
+    for test, title, desc in [
+        (
+            ("moved", "city"),
+            "Relocation & Reinvention",
+            f"A move documented in your files, showing adaptation across {year_range}.",
+        ),
+        (
+            ("job", "career"),
+            "Career Evolution",
+            "Professional changes appear in your entries.",
+        ),
+        (
+            "friend",
+            "Social Landscape",
+            f"Relationships with {people_str if people else 'others'} evolve across your timeline.",
+        ),
+        (
+            "alone",
+            "Solitude & Self-Discovery",
+            "An arc from loneliness to chosen solitude.",
+        ),
+    ]:
+        hits = [test] if isinstance(test, str) else test
+        if any(k in topic_map for k in hits):
+            arcs.append({"title": title, "description": desc})
     if not arcs:
         arcs.append(
             {
                 "title": "Documented Experience",
-                "description": f"{len(filenames)} files spanning {year_range}, capturing personal reflections and events.",
+                "description": f"{len(filenames)} files spanning {year_range}.",
             }
         )
 
-    # Mindset shifts from data
     shifts = []
     if ("scared" in topic_map or "afraid" in topic_map) and (
         "proud" in topic_map or "happy" in topic_map
@@ -356,7 +301,7 @@ def _fallback_synthesis(batched_text: str) -> dict:
             {
                 "from_state": "Uncertainty and self-doubt",
                 "to_state": "Growing confidence",
-                "evidence": f"Early entries express fear while later entries show pride and satisfaction.",
+                "evidence": "Early entries express fear while later entries show pride.",
                 "period": year_range,
             }
         )
@@ -365,7 +310,7 @@ def _fallback_synthesis(batched_text: str) -> dict:
             {
                 "from_state": "Viewing solitude as loneliness",
                 "to_state": "Embracing chosen solitude",
-                "evidence": "The language around being alone shifts from negative to neutral or positive.",
+                "evidence": "The language around being alone shifts from negative to neutral.",
                 "period": year_range,
             }
         )
@@ -374,41 +319,44 @@ def _fallback_synthesis(batched_text: str) -> dict:
             {
                 "from_state": "Initial state in early entries",
                 "to_state": "Evolved state in later entries",
-                "evidence": f"Changes in tone and content across your files suggest personal growth.",
+                "evidence": "Changes in tone suggest personal growth.",
                 "period": year_range,
             }
         )
 
-    # Identity contradictions
     contradictions = []
     if ("scared" in topic_map or "afraid" in topic_map) and "moved" in topic_map:
         contradictions.append(
             {
-                "observation": "You describe fear, yet you made a major life change that requires courage.",
-                "evidence": f"Entries expressing fear coexist with evidence of a move or career change.",
-                "interpretation": "You may downplay your own bravery, focusing on doubt while taking bold actions.",
+                "observation": "You describe fear, yet you made a major life change.",
+                "evidence": "Entries expressing fear coexist with evidence of a move.",
+                "interpretation": "You may downplay your own bravery.",
             }
         )
     if "alone" in topic_map and people:
         contradictions.append(
             {
-                "observation": "You describe being alone, but multiple people appear across your entries.",
+                "observation": "You describe being alone, but multiple people appear.",
                 "evidence": f"Despite references to solitude, {people_str} appear repeatedly.",
-                "interpretation": "You may feel isolated even while maintaining meaningful relationships.",
+                "interpretation": "You may feel isolated while maintaining relationships.",
             }
         )
     if not contradictions:
         contradictions.append(
             {
-                "observation": f"Your data shows both desire for change and anchoring habits.",
+                "observation": "Your data shows both desire for change and anchoring habits.",
                 "evidence": "Major decisions coexist with everyday routines.",
-                "interpretation": "Growth happens in the tension between the familiar and the unknown.",
+                "interpretation": "Growth happens in tension between familiar and unknown.",
             }
         )
 
-    # People
-    people_list = (
-        [
+    return {
+        "the_sentence": f"Across {len(filenames)} files spanning {year_range}, your data reveals patterns worth examining.",
+        "narrative": " ".join(narrative_parts)
+        if narrative_parts
+        else f"Your {len(filenames)} uploaded files span {year_range}.",
+        "story_arcs": arcs[:3],
+        "recurring_people": [
             {
                 "identifier": p,
                 "context": f"Appears in your entries across {year_range}.",
@@ -416,53 +364,25 @@ def _fallback_synthesis(batched_text: str) -> dict:
             for p in people
         ]
         if people
-        else []
-    )
-    if not people_list:
-        people_list = [
+        else [
             {
                 "identifier": "Yourself",
                 "context": "The narrator across your uploaded files.",
             }
-        ]
-
-    # Defining moments
-    moments = []
-    if dates:
-        moments.append(
+        ],
+        "defining_moments": [
             {
                 "moment": f"Entries from {dates[0]} to {dates[-1]}",
-                "significance": f"Your documented timeline spans from {dates[0]} to {dates[-1]}.",
+                "significance": f"Your timeline spans {dates[0]} to {dates[-1]}.",
             }
-        )
-    if topic_map.get("moved"):
-        moments.append(
-            {
-                "moment": "The move in your entries",
-                "significance": "A pivot point separating 'before' and 'after' in your timeline.",
-            }
-        )
-    if topic_map.get("promotion"):
-        moments.append(
-            {
-                "moment": "A promotion mentioned in your data",
-                "significance": "A milestone in your professional journey.",
-            }
-        )
-    if not moments:
-        moments.append(
+        ]
+        if dates
+        else [
             {
                 "moment": "Your data upload",
-                "significance": "The beginning of structured self-reflection through your files.",
+                "significance": "The beginning of structured self-reflection.",
             }
-        )
-
-    return {
-        "the_sentence": f"Across {len(filenames)} files spanning {year_range}, your data reveals patterns worth examining.",
-        "narrative": fallback_narrative,
-        "story_arcs": arcs[:3],
-        "recurring_people": people_list[:4],
-        "defining_moments": moments[:3],
+        ],
         "mindset_shifts": shifts[:2],
         "core_themes": list(topic_map.keys())[:5]
         if topic_map
