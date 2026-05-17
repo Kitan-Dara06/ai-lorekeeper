@@ -23,10 +23,10 @@ class Settings(BaseSettings):
     SUPABASE_URL: str = ""
     SUPABASE_JWT_SECRET: str = ""
 
-    # Groq / Modal (Gemma 4 inference)
-    INFERENCE_API_KEY: str = ""
-    INFERENCE_MODEL: str = "google/gemma-4-E4B-it"
-    INFERENCE_API_URL: str = "https://ololadeaaliyah--ai-lorekeeper-gemma-serve.modal.run/v1/chat/completions"
+    # Google AI / Gemini API (Gemma 4 inference)
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemma-4-31b-it"
+    GEMINI_API_URL: str = "https://generativelanguage.googleapis.com/v1beta/models"
 
     # Files
     UPLOAD_DIR: str = "uploaded_files"
