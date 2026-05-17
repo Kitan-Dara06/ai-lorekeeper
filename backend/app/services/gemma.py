@@ -57,11 +57,12 @@ async def call_gemma_synthesis(batched_text: str) -> Optional[dict]:
     url = f"{settings.GEMINI_API_URL}/{settings.GEMINI_MODEL}:generateContent?key={settings.GEMINI_API_KEY}"
 
     payload = {
+        "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
         "contents": [
             {
                 "parts": [
                     {
-                        "text": f"{SYSTEM_PROMPT}\n\nHere is the chronological data to analyze:\n\n{batched_text}"
+                        "text": f"Here is the chronological data to analyze:\n\n{batched_text}"
                     }
                 ]
             }
