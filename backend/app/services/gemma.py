@@ -95,8 +95,17 @@ async def call_gemma_synthesis(batched_text: str) -> Optional[dict]:
             logger.warning("Gemma 4 returned empty response")
             return None
 
-        logger.info("Gemma 4 response received, parsing JSON...")
-        return _parse_json_response(text_content)
+        logger.info(
+            f"Gemma 4 raw response ({len(text_content)} chars): {text_content[:200]}..."
+        )
+        parsed = _parse_json_response(text_content)
+        if parsed:
+            logger.info("JSON parsed successfully")
+        else:
+            logger.warning(
+                f"Failed to parse JSON from response, first 500 chars: {text_content[:500]}"
+            )
+        return parsed
 
     except Exception as e:
         logger.error(f"Google AI API call failed: {e}")
